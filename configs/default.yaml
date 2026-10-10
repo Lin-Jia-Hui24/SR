@@ -1,0 +1,31 @@
+seed: 42
+device: auto
+output_dir: outputs/edsr_x4
+
+model:
+  scale: 4
+  num_features: 256
+  num_blocks: 32
+  res_scale: 0.1
+
+data:
+  # "synthetic" creates LR images from HR training images. "paired" expects lr_dir/hr_dir.
+  mode: synthetic
+  train_hr_dir: data/train/HR
+  val_hr_dir: data/val/HR
+  train_lr_dir: null
+  val_lr_dir: null
+  patch_size: 192
+  num_workers: 4
+  augment: true
+
+train:
+  epochs: 300
+  batch_size: 16
+  learning_rate: 0.0001
+  weight_decay: 0.0
+  milestones: [200, 250]
+  gamma: 0.5
+  save_every: 10
+  resume: null
+  amp: true
