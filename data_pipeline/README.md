@@ -2,6 +2,25 @@
 
 训练代码通过 `RealSRDataset` 读取数据，通过 `collate_pairs` 组成批次。模型和训练循环由训练方编写。
 
+## 单独接入简单增强
+
+只需要增强时，从仓库导入 `augment_pair`，在自己的 Dataset 的 `__getitem__` 中调用：
+
+```python
+from data_pipeline import augment_pair
+
+# lr、hr 为 RGB [3,H,W]、[3,2H,2W] Tensor；在组成 batch 之前调用
+if self.split == "train":
+    lr, hr = augment_pair(lr, hr)  # 整图：同步随机翻转、90° 倍数旋转
+return lr, hr
+```
+
+需要随机同步裁剪时改为 `augment_pair(lr, hr, patch_size=96)`，得到 LR 96×96／HR 192×192；边长不能超过原 LR 的宽或高。默认 `patch_size=0` 使用整图，搭配 `batch_size=1`。函数返回两个 Tensor，保留原来的像素值范围、dtype 和 device。
+
+在训练开始时调用一次 `torch.manual_seed(42)` 设置随机种子。每次读取样本在线增强，无需另存图片；验证和测试不调用这个函数。也可以只复制 `data_pipeline/augmentation.py` 到自己的项目，改用 `from augmentation import augment_pair`，仅依赖 PyTorch。
+
+若使用下面的 `RealSRDataset`，直接设 `mode="geometry"` 即可启用同类增强，无需再调用此函数。
+
 ## 1. 准备环境和数据
 
 使用 Python 3.11 或更高版本，以下命令均从仓库根目录执行：
