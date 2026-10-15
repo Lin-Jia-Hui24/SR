@@ -52,6 +52,16 @@ python train.py --config configs/default.yaml
 
 验证使用固定验证集的原生 LR/HR 图对。默认只开启同步几何增强；如需实验 `mixup`、`blend` 或 `consistent_blend`，修改配置中的 `data.augmentation`。
 
+## 从官方 EDSR ×2 权重微调
+
+下载官方完整 `r32f256x2` 权重至 `weights/edsr_x2-0edfb8a3.pt` 后运行：
+
+```powershell
+python train.py --config configs/finetune_realsr_x2.yaml
+```
+
+该配置使用低学习率微调，并在验证 PSNR 连续 15 轮未提升至少 0.01 dB 时停止。`best.pt` 始终保存验证集最佳模型；可用 `--resume outputs/edsr_realsr_x2_finetune/last.pt` 恢复中断训练。也可用 `--pretrained <权重路径>` 临时覆盖配置中的权重路径。
+
 ## 使用作者公布的权重做基线
 
 将作者的 `.pt` 或 `.pth` 文件放入 `weights/`（该目录不会自动创建），**先确认该权重对应的放大倍率、特征通道数和残差块数量**。它们必须与配置中的 `model.scale`、`model.num_features`、`model.num_blocks` 一致；公开的 EDSR 基线通常是 x2/x3/x4、256 通道、32 个残差块，但请以作者说明为准。

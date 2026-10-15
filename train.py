@@ -24,6 +24,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train EDSR for image super-resolution.")
     parser.add_argument("--config", default="configs/default.yaml")
     parser.add_argument("--resume", default=None, help="Checkpoint path (overrides config).")
+    parser.add_argument("--pretrained", default=None, help="Published model weights used to initialize fine-tuning.")
     return parser.parse_args()
 
 
@@ -64,7 +65,7 @@ def main() -> None:
     optimizer = Adam(model.parameters(), lr=train_cfg["learning_rate"], weight_decay=train_cfg["weight_decay"])
     scheduler = MultiStepLR(optimizer, milestones=train_cfg["milestones"], gamma=train_cfg["gamma"])
     scaler = torch.amp.GradScaler("cuda", enabled=train_cfg["amp"] and device.type == "cuda")
-    start_epoch, best_psnr = 1, float("-inf")
+    start_epoch, best_psnr, epochs_without_improvement = 1, float("-inf"), 0
     resume = args.resume or train_cfg.get("resume")
     if resume:
         state = torch.load(resume, map_location=device, weights_only=False)
@@ -72,14 +73,17 @@ def main() -> None:
         optimizer.load_state_dict(state["optimizer"])
         scheduler.load_state_dict(state["scheduler"])
         start_epoch, best_psnr = state["epoch"] + 1, state.get("best_psnr", best_psnr)
-    elif train_cfg.get("pretrained"):
+        epochs_without_improvement = state.get("epochs_without_improvement", 0)
+    elif args.pretrained or train_cfg.get("pretrained"):
         report = load_weights(
-            model, train_cfg["pretrained"], device,
+            model, args.pretrained or train_cfg["pretrained"], device,
             strict=train_cfg.get("pretrained_strict", True), num_blocks=model_cfg["num_blocks"],
         )
         print(f"Loaded published weights: {report['loaded']}/{report['model_tensors']} tensors")
 
     writer = SummaryWriter(output / "logs")
+    patience = train_cfg.get("early_stopping_patience")
+    min_delta = train_cfg.get("early_stopping_min_delta", 0.0)
     for epoch in range(start_epoch, train_cfg["epochs"] + 1):
         if realsr:
             train_set.set_epoch(epoch)
@@ -111,14 +115,29 @@ def main() -> None:
         writer.add_scalar("loss/train", train_loss, epoch)
         writer.add_scalar("psnr/validation", val_psnr, epoch)
         print(f"Epoch {epoch}: train L1={train_loss:.6f}, validation PSNR={val_psnr:.3f} dB")
-        state = {"epoch": epoch, "model": model.state_dict(), "optimizer": optimizer.state_dict(), "scheduler": scheduler.state_dict(), "best_psnr": best_psnr, "config": cfg}
-        save_checkpoint(output / "last.pt", **state)
-        if val_psnr > best_psnr:
+        improved = val_psnr > best_psnr + min_delta
+        if improved:
             best_psnr = val_psnr
-            state["best_psnr"] = best_psnr
+            epochs_without_improvement = 0
+        else:
+            epochs_without_improvement += 1
+        state = {
+            "epoch": epoch,
+            "model": model.state_dict(),
+            "optimizer": optimizer.state_dict(),
+            "scheduler": scheduler.state_dict(),
+            "best_psnr": best_psnr,
+            "epochs_without_improvement": epochs_without_improvement,
+            "config": cfg,
+        }
+        save_checkpoint(output / "last.pt", **state)
+        if improved:
             save_checkpoint(output / "best.pt", **state)
         if epoch % train_cfg["save_every"] == 0:
             save_checkpoint(output / f"epoch_{epoch:03d}.pt", **state)
+        if patience is not None and epochs_without_improvement >= patience:
+            print(f"Early stopping after {patience} epochs without a PSNR improvement of {min_delta} dB.")
+            break
     writer.close()
 
 
