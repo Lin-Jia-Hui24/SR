@@ -1,22 +1,25 @@
 seed: 42
 device: auto
-output_dir: outputs/edsr_x4
+output_dir: outputs/edsr_realsr_x2
 
 model:
-  scale: 4
+  scale: 2
   num_features: 256
   num_blocks: 32
   res_scale: 0.1
 
 data:
-  # "synthetic" creates LR images from HR training images. "paired" expects lr_dir/hr_dir.
-  mode: synthetic
-  train_hr_dir: data/train/HR
-  val_hr_dir: data/val/HR
+  # RealSR native LR/HR pairs are x2. Fetch data with the command in README.
+  mode: realsr_x2
+  manifest: data_pipeline/splits/realsr_x2.json
+  root: data/realsr
+  patch_size: 96
+  augmentation: geometry
+  train_hr_dir: null
+  val_hr_dir: null
   train_lr_dir: null
   val_lr_dir: null
-  patch_size: 192
-  num_workers: 4
+  num_workers: 0
   augment: true
 
 train:
@@ -28,4 +31,7 @@ train:
   gamma: 0.5
   save_every: 10
   resume: null
+  # Optional published EDSR .pt/.pth file. This initializes training only; it does not restore optimizer state.
+  pretrained: null
+  pretrained_strict: true
   amp: true

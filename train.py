@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 import torch
@@ -15,6 +16,8 @@ from tqdm import tqdm
 from edsr.data import SuperResolutionDataset
 from edsr.model import EDSR
 from edsr.utils import psnr, save_checkpoint, set_seed
+from edsr.weights import load_weights
+from data_pipeline.realsr_demo.torch_data import RealSRDataset, collate_pairs
 
 
 def parse_args() -> argparse.Namespace:
@@ -36,11 +39,25 @@ def main() -> None:
 
     data_cfg, model_cfg, train_cfg = cfg["data"], cfg["model"], cfg["train"]
     scale = model_cfg["scale"]
-    train_set = SuperResolutionDataset(data_cfg["train_hr_dir"], scale, data_cfg["patch_size"], data_cfg["augment"], data_cfg["train_lr_dir"] if data_cfg["mode"] == "paired" else None)
-    val_set = SuperResolutionDataset(data_cfg["val_hr_dir"], scale, None, False, data_cfg["val_lr_dir"] if data_cfg["mode"] == "paired" else None)
+    realsr = data_cfg["mode"] == "realsr_x2"
+    if realsr:
+        with open(data_cfg["manifest"], encoding="utf-8") as handle:
+            report = json.load(handle)
+        if scale != 2:
+            raise ValueError("RealSR provides native x2 pairs; set model.scale to 2.")
+        train_set = RealSRDataset(
+            report, root=data_cfg["root"], split="train", patch_size=data_cfg["patch_size"],
+            mode=data_cfg["augmentation"], seed=cfg["seed"],
+        )
+        val_set = RealSRDataset(report, root=data_cfg["root"], split="val")
+    else:
+        paired = data_cfg["mode"] == "paired"
+        train_set = SuperResolutionDataset(data_cfg["train_hr_dir"], scale, data_cfg["patch_size"], data_cfg["augment"], data_cfg["train_lr_dir"] if paired else None)
+        val_set = SuperResolutionDataset(data_cfg["val_hr_dir"], scale, None, False, data_cfg["val_lr_dir"] if paired else None)
     loader_options = dict(num_workers=data_cfg["num_workers"], pin_memory=device.type == "cuda")
-    train_loader = DataLoader(train_set, train_cfg["batch_size"], shuffle=True, drop_last=True, **loader_options)
-    val_loader = DataLoader(val_set, 1, shuffle=False, **loader_options)
+    collate = collate_pairs if realsr else None
+    train_loader = DataLoader(train_set, train_cfg["batch_size"], shuffle=True, drop_last=True, collate_fn=collate, **loader_options)
+    val_loader = DataLoader(val_set, 1, shuffle=False, collate_fn=collate, **loader_options)
 
     model = EDSR(**model_cfg).to(device)
     criterion = nn.L1Loss()
@@ -55,13 +72,22 @@ def main() -> None:
         optimizer.load_state_dict(state["optimizer"])
         scheduler.load_state_dict(state["scheduler"])
         start_epoch, best_psnr = state["epoch"] + 1, state.get("best_psnr", best_psnr)
+    elif train_cfg.get("pretrained"):
+        report = load_weights(
+            model, train_cfg["pretrained"], device,
+            strict=train_cfg.get("pretrained_strict", True), num_blocks=model_cfg["num_blocks"],
+        )
+        print(f"Loaded published weights: {report['loaded']}/{report['model_tensors']} tensors")
 
     writer = SummaryWriter(output / "logs")
     for epoch in range(start_epoch, train_cfg["epochs"] + 1):
+        if realsr:
+            train_set.set_epoch(epoch)
         model.train()
         progress = tqdm(train_loader, desc=f"Epoch {epoch}/{train_cfg['epochs']}")
         running_loss = 0.0
-        for lr, hr in progress:
+        for batch in progress:
+            lr, hr = (batch["lr"], batch["hr"]) if realsr else batch
             lr, hr = lr.to(device, non_blocking=True), hr.to(device, non_blocking=True)
             optimizer.zero_grad(set_to_none=True)
             with torch.autocast(device_type=device.type, enabled=scaler.is_enabled()):
@@ -76,7 +102,8 @@ def main() -> None:
         model.eval()
         scores: list[float] = []
         with torch.no_grad():
-            for lr, hr in val_loader:
+            for batch in val_loader:
+                lr, hr = (batch["lr"], batch["hr"]) if realsr else batch
                 prediction = model(lr.to(device)).clamp(0, 1)
                 scores.append(psnr(prediction, hr.to(device), scale))
         val_psnr = sum(scores) / len(scores)

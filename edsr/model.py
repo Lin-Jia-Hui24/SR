@@ -46,7 +46,7 @@ class EDSR(nn.Module):
 
     def __init__(
         self,
-        scale: int = 4,
+        scale: int = 2,
         num_features: int = 256,
         num_blocks: int = 32,
         res_scale: float = 0.1,

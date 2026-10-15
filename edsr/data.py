@@ -91,3 +91,4 @@ class SuperResolutionDataset(Dataset[tuple[Tensor, Tensor]]):
             if random.random() < 0.5:
                 hr, lr = TF.rotate(hr, 90), TF.rotate(lr, 90)
         return TF.to_tensor(lr), TF.to_tensor(hr)
+
