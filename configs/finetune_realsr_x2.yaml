@@ -35,6 +35,3 @@ train:
   pretrained: weights/edsr_x2-0edfb8a3.pt
   pretrained_strict: true
   amp: true
-  # Stop once validation PSNR fails to improve by 0.01 dB for 15 epochs.
-  early_stopping_patience: 15
-  early_stopping_min_delta: 0.01

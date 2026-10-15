@@ -60,7 +60,7 @@ python train.py --config configs/default.yaml
 python train.py --config configs/finetune_realsr_x2.yaml
 ```
 
-该配置使用低学习率微调，并在验证 PSNR 连续 15 轮未提升至少 0.01 dB 时停止。`best.pt` 始终保存验证集最佳模型；可用 `--resume outputs/edsr_realsr_x2_finetune/last.pt` 恢复中断训练。也可用 `--pretrained <权重路径>` 临时覆盖配置中的权重路径。
+该配置使用低学习率完整微调 80 个 epoch。`best.pt` 始终保存验证集最佳模型；可用 `--resume outputs/edsr_realsr_x2_finetune/last.pt` 恢复中断训练。也可用 `--pretrained <权重路径>` 临时覆盖配置中的权重路径。
 
 ## 使用作者公布的权重做基线
 
