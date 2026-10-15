@@ -2,24 +2,48 @@
 
 训练代码通过 `RealSRDataset` 读取数据，通过 `collate_pairs` 组成批次。模型和训练循环由训练方编写。
 
-## 单独接入简单增强
+## 单独接入增强
 
-只需要增强时，从仓库导入 `augment_pair`，在自己的 Dataset 的 `__getitem__` 中调用：
+只需一个函数，输入为 RGB `[3,H,W]`／`[3,2H,2W]` 的 `float32` Tensor，范围 `[0,1]`，返回 `(lr, hr)`。在训练 Dataset 的 `__getitem__` 中、组成 batch 之前调用：
 
 ```python
 from data_pipeline import augment_pair
 
-# lr、hr 为 RGB [3,H,W]、[3,2H,2W] Tensor；在组成 batch 之前调用
 if self.split == "train":
-    lr, hr = augment_pair(lr, hr)  # 整图：同步随机翻转、90° 倍数旋转
+    lr, hr = augment_pair(lr, hr, mode="consistent_blend")
 return lr, hr
 ```
 
-需要随机同步裁剪时改为 `augment_pair(lr, hr, patch_size=96)`，得到 LR 96×96／HR 192×192；边长不能超过原 LR 的宽或高。默认 `patch_size=0` 使用整图，搭配 `batch_size=1`。函数返回两个 Tensor，保留原来的像素值范围、dtype 和 device。
+| `mode` | 行为 |
+|---|---|
+| `none` | 不增强；若指定 `patch_size`，仍同步裁剪 |
+| `geometry` | 默认模式；同步随机水平／垂直翻转、90° 倍数旋转 |
+| `mixup` | 几何增强后，两组训练图的 LR／HR 用同一个 λ 混合；需传 `other` |
+| `hr_blend` | 自定义局部混合：抗混叠下采样 HR，并以平滑权重局部混入 LR；HR 保持几何增强后的目标 |
+| `consistent_blend` | 在 `hr_blend` 上按低通梯度一致性减弱混合；平坦或过小区域跳过混合 |
 
-在训练开始时调用一次 `torch.manual_seed(42)` 设置随机种子。每次读取样本在线增强，无需另存图片；验证和测试不调用这个函数。也可以只复制 `data_pipeline/augmentation.py` 到自己的项目，改用 `from augmentation import augment_pair`，仅依赖 PyTorch。
+除 `none` 外各模式均包含几何增强。`p=0.5` 控制额外混合的触发概率，`strength=0.3` 控制两种 HR 引导混合的最大强度；均可设为 `[0,1]` 内的数。Mixup 的 λ 从 `Beta(0.2,0.2)` 采样。`hr_blend/consistent_blend` 是 ×2 适配实验策略，不是原版 CutBlur；后者的门控分数也不是配准概率。
 
-若使用下面的 `RealSRDataset`，直接设 `mode="geometry"` 即可启用同类增强，无需再调用此函数。
+默认 `patch_size=0` 使用整图，搭配 `batch_size=1`。需要随机同步裁剪时：
+
+```python
+lr, hr = augment_pair(lr, hr, patch_size=96, mode="hr_blend")
+# LR 96×96，HR 192×192；96 不能超过原 LR 的宽或高
+```
+
+Mixup 由调用方额外读取**另一对训练图**，两对分别同步裁剪，再共享几何参数和混合系数：
+
+```python
+lr, hr = augment_pair(
+    lr, hr, patch_size=96, mode="mixup", other=(lr2, hr2),
+)
+```
+
+`other` 的 Tensor 格式与主样本相同；两对整图尺寸相同时可省略 `patch_size`。只在训练集调用，验证／测试用原图。建议在 CPU Dataset 中处理；函数保留 dtype 和 device，不原地修改输入。在训练开始时调用一次 `torch.manual_seed(42)` 设置随机种子，无需另存增强图片。
+
+也可以只复制 `data_pipeline/augmentation.py` 到自己的项目，改用 `from augmentation import augment_pair`，只依赖 PyTorch。
+
+对比这组策略时统一使用此函数；若前面还用了 `RealSRDataset`，将其 `mode` 设为 `none`，避免叠加其原有增强。
 
 ## 1. 准备环境和数据
 
