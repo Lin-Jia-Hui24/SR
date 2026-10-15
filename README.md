@@ -40,3 +40,7 @@ tensorboard --logdir outputs/edsr_x4/logs
 ```powershell
 python infer.py --checkpoint outputs/edsr_x4/best.pt --input sample_lr.png --output result_sr.png
 ```
+
+## RealSR V3 ×2 数据接口
+
+真实 LR／HR 配对、固定数据划分和增强接口见 [data_pipeline/README.md](data_pipeline/README.md)。从仓库根目录导入 `data_pipeline.realsr_demo.torch_data`；接入 EDSR 时设置 `scale=2`，按说明读取字典批次。
