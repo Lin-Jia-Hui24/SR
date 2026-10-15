@@ -1,0 +1,5 @@
+numpy>=1.26,<3
+Pillow>=10.1,<13
+torch>=2.2,<3
+scikit-image>=0.22,<1
+
