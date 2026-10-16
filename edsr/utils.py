@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import random
+import os
+import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -25,4 +27,14 @@ def psnr(prediction: Tensor, target: Tensor, scale: int, shave: bool = True) -> 
 
 def save_checkpoint(path: Path, **state: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    torch.save(state, path)
+    # A preempted worker must never replace a usable resume checkpoint with a
+    # partially written archive.  Write beside the destination and atomically
+    # publish it only after torch.save has completed.
+    descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    os.close(descriptor)
+    try:
+        torch.save(state, temporary)
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)

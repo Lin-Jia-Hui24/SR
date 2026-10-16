@@ -6,6 +6,20 @@ import torch
 from torch import nn
 
 
+class MeanShift(nn.Conv2d):
+    """Frozen RGB mean shift used by the published full EDSR checkpoints."""
+
+    def __init__(self, sign: int = -1) -> None:
+        super().__init__(3, 3, kernel_size=1)
+        # The official r32f256 EDSR checkpoints operate in RGB [0, 255].
+        rgb_mean = 255.0 * torch.tensor([0.4488, 0.4371, 0.4040])
+        with torch.no_grad():
+            self.weight.copy_(torch.eye(3).view(3, 3, 1, 1))
+            self.bias.copy_(sign * rgb_mean)
+        self.weight.requires_grad_(False)
+        self.bias.requires_grad_(False)
+
+
 class ResidualBlock(nn.Module):
     """EDSR residual block without batch normalization."""
 
@@ -52,6 +66,9 @@ class EDSR(nn.Module):
         res_scale: float = 0.1,
     ) -> None:
         super().__init__()
+        # Callers use RGB [0, 1], while published EDSR weights use [0, 255]
+        # around their fixed mean-shift layers. Convert only at this boundary.
+        self.sub_mean = MeanShift(-1)
         self.head = nn.Conv2d(3, num_features, 3, padding=1)
         self.body = nn.Sequential(*[ResidualBlock(num_features, res_scale) for _ in range(num_blocks)])
         self.body_tail = nn.Conv2d(num_features, num_features, 3, padding=1)
@@ -59,16 +76,17 @@ class EDSR(nn.Module):
             Upsampler(scale, num_features),
             nn.Conv2d(num_features, 3, 3, padding=1),
         )
+        self.add_mean = MeanShift(1)
         self._initialize_weights()
 
     def _initialize_weights(self) -> None:
         for module in self.modules():
-            if isinstance(module, nn.Conv2d):
+            if isinstance(module, nn.Conv2d) and not isinstance(module, MeanShift):
                 nn.init.kaiming_normal_(module.weight, mode="fan_in", nonlinearity="relu")
                 if module.bias is not None:
                     nn.init.zeros_(module.bias)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = self.head(x)
+        x = self.head(self.sub_mean(x * 255.0))
         residual = self.body_tail(self.body(x))
-        return self.tail(x + residual)
+        return self.add_mean(self.tail(x + residual)) / 255.0

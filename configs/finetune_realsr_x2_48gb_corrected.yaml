@@ -1,0 +1,38 @@
+seed: 42
+device: auto
+output_dir: outputs/edsr_realsr_x2_finetune_48gb_corrected
+
+model:
+  scale: 2
+  num_features: 256
+  num_blocks: 32
+  res_scale: 0.1
+
+data:
+  mode: realsr_x2
+  manifest: data_pipeline/splits/realsr_x2.json
+  root: data/realsr
+  patch_size: 96
+  augmentation: geometry
+  train_hr_dir: null
+  val_hr_dir: null
+  train_lr_dir: null
+  val_lr_dir: null
+  num_workers: 0
+  augment: true
+
+train:
+  epochs: 80
+  batch_size: 8
+  learning_rate: 0.00001
+  weight_decay: 0.0
+  milestones: [50, 70]
+  gamma: 0.5
+  # Keep only the final numbered snapshot. `last.pt` and `best.pt` are saved
+  # every epoch atomically, which is sufficient for recovery and selection.
+  save_every: 80
+  resume: null
+  # Restart from the official checkpoint; do not reuse the mismatched-range run.
+  pretrained: weights/edsr_x2-0edfb8a3.pt
+  pretrained_strict: true
+  amp: true
