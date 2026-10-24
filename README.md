@@ -1,91 +1,143 @@
-# EDSR 超分辨率训练框架
+# EDSR ×2 超分辨率 — RealSR V3
 
-一个基于 PyTorch 的 EDSR 训练基线，包含模型、数据集、训练与验证、TensorBoard、AMP、断点恢复和单图推理。
+基于 PyTorch 的 EDSR 超分辨率框架，在 RealSR V3 真实 LR/HR 配对数据上做 ×2 超分辨率。包含训练、评测、消融实验配置和推理工具。
 
-## 安装
+## 项目结构
 
-```powershell
+```
+SR/
+├── edsr/                    # 模型与工具
+│   ├── model.py             # EDSR 网络 + build_model 工厂
+│   ├── data.py              # PyTorch Dataset
+│   ├── losses.py            # 损失函数（L1）
+│   ├── utils.py             # seed / PSNR / checkpoint / self-ensemble
+│   └── weights.py           # 预训练权重加载与 key 映射
+├── data_pipeline/           # RealSR 数据管线
+│   ├── realsr_demo/         # 数据加载、增强、评测、可视化
+│   ├── splits/              # 固定 train/val/test 划分
+│   └── tests/               # 单元测试
+├── configs/
+│   ├── default.yaml         # 默认训练配置
+│   ├── finetune_realsr_x2.yaml
+│   └── ablation/            # 消融实验配置
+│       ├── L0_baseline.yaml     # 基线 (patch=96)
+│       ├── P1_large_patch.yaml  # 大 patch (patch=192)
+│       └── P2_xlarge_patch.yaml # 更大 patch (patch=256)
+├── train.py                 # 训练脚本
+├── evaluate_edsr.py         # 评测脚本（支持 self-ensemble）
+├── collect_results.py       # 结果汇总
+└── infer.py                 # 单图推理
+```
+
+## 环境配置
+
+```bash
 python -m venv .venv
-.\.venv\Scripts\Activate.ps1
+source .venv/bin/activate    # Linux/macOS
 pip install -r requirements.txt
 ```
 
-## 数据组织
+## 数据准备
 
-默认的 `synthetic` 模式只需要高分辨率（HR）图像，会在训练时以双三次插值自动生成低分辨率（LR）图像：
+下载 RealSR V3 数据集：
 
-```
-data/
-  train/HR/*.png
-  val/HR/*.png
+```bash
+python -m data_pipeline.realsr_demo fetch --root data/realsr
 ```
 
-真正的 LR/HR 成对数据可将 `configs/default.yaml` 的 `data.mode` 改为 `paired`，并填写 `train_lr_dir`、`val_lr_dir`。LR 与 HR 文件须同名（扩展名可以不同）。
-
-## 训练与继续训练
-
-```powershell
-python train.py --config configs/default.yaml
-python train.py --config configs/default.yaml --resume outputs/edsr_realsr_x2/last.pt
+数据目录结构：
+```
+data/realsr/RealSR(V3)/
+├── Canon/
+│   ├── Train/2/    # Canon LR2/HR 训练对
+│   └── Test/2/     # Canon LR2/HR 测试对
+└── Nikon/
+    ├── Train/2/
+    └── Test/2/
 ```
 
-训练结果会写入 `outputs/edsr_realsr_x2/`：`best.pt` 是验证 PSNR 最优权重，`last.pt` 可用于恢复训练，`logs/` 可被 TensorBoard 读取。
+数据集包含 365 train / 41 val / 100 test pairs（Canon + Nikon 真实相机采集）。
 
-```powershell
-tensorboard --logdir outputs/edsr_realsr_x2/logs
+## 训练
+
+从官方 EDSR ×2 预训练权重微调：
+
+```bash
+# 基线训练 (patch=96, batch=16, 80 epochs)
+python train.py --config configs/ablation/L0_baseline.yaml
+
+# 大 patch 训练 (patch=192, batch=4, 80 epochs)
+python train.py --config configs/ablation/P1_large_patch.yaml
+
+# 恢复训练
+python train.py --config configs/ablation/L0_baseline.yaml --resume outputs/ablation/L0_baseline/last.pt
+```
+
+预训练权重放在 `weights/edsr_x2-0edfb8a3.pt`（官方 EDSR r32f256 DIV2K 权重）。
+
+训练输出：
+- `best.pt` — 验证 PSNR 最优的 checkpoint
+- `last.pt` — 最后一个 epoch，可用于恢复训练
+- `epoch_XXX.pt` — 每个 epoch 的 checkpoint
+- `config.yaml` — 实验配置备份
+
+支持 wandb 日志（可用 `--no-wandb` 关闭）。
+
+## 评测
+
+```bash
+# 标准评测
+python evaluate_edsr.py \
+  --config configs/ablation/L0_baseline.yaml \
+  --checkpoint outputs/ablation/L0_baseline/best.pt \
+  --output results/L0
+
+# Self-ensemble ×8（推理时 4 旋转 × 2 翻转取平均，+0.10 dB）
+python evaluate_edsr.py \
+  --config configs/ablation/L0_baseline.yaml \
+  --checkpoint outputs/ablation/L0_baseline/best.pt \
+  --output results/L0_x8 \
+  --self-ensemble
+```
+
+评测在 100 张 test set 上计算 PSNR / SSIM（RGB，float32），按相机（Canon/Nikon）分别汇总。
+
+汇总所有实验结果：
+
+```bash
+python collect_results.py
 ```
 
 ## 推理
 
-```powershell
-python infer.py --checkpoint outputs/edsr_x4/best.pt --input sample_lr.png --output result_sr.png
+```bash
+python infer.py --checkpoint outputs/ablation/L0_baseline/best.pt --input sample_lr.png --output result_sr.png
 ```
 
-## RealSR ×2 训练
+## 消融实验结果
 
-真实 LR／HR 配对、固定数据划分和增强工具见 [data_pipeline/README.md](data_pipeline/README.md)。默认配置直接使用 RealSR 原生 ×2 配对：模型输入 LR 后输出宽高两倍的结果，与 HR 目标逐像素比较。
+在 RealSR V3 test set（100 张）上的结果：
 
-```powershell
-python -m data_pipeline.realsr_demo fetch --root data/realsr
-python train.py --config configs/default.yaml
-```
+| 配置 | Patch | Test PSNR | Δ vs Baseline |
+|------|-------|-----------|---------------|
+| Bicubic | — | 30.02 | -1.80 |
+| L0 Baseline | 96 | 31.82 | — |
+| P1 Large Patch | 192 | 31.99 | +0.17 |
+| P1 + SE ×8 | 192 | 32.08 | +0.26 |
+| P2 XLarge Patch | 256 | 32.05 | +0.23 |
+| **P2 + SE ×8** | **256** | **32.14** | **+0.32** |
 
-验证使用固定验证集的原生 LR/HR 图对。默认只开启同步几何增强；如需实验 `mixup`、`blend` 或 `consistent_blend`，修改配置中的 `data.augmentation`。
+核心发现：
 
-## 从官方 EDSR ×2 权重微调
+- **大 Patch Size 是最有效的改进**：patch 96→192 涨 +0.17 dB，192→256 再涨 +0.06 dB。RealSR 的真实退化比合成退化（bicubic）复杂，更大的感受野让网络更好地建模退化模式。
+- **Self-Ensemble ×8 是稳定的免费涨点**：+0.09~0.11 dB，利用 CNN 对几何变换的不完全等变性质，不需要额外训练，推理时间 ×8。
+- 两项改进正交可叠加：Large Patch (+0.23) + SE (+0.09) = **+0.32 dB**。
 
-下载官方完整 `r32f256x2` 权重至 `weights/edsr_x2-0edfb8a3.pt` 后运行：
+## 项目成员
 
-```powershell
-python train.py --config configs/finetune_realsr_x2.yaml
-```
-
-该配置使用低学习率完整微调 80 个 epoch。`best.pt` 始终保存验证集最佳模型；可用 `--resume outputs/edsr_realsr_x2_finetune/last.pt` 恢复中断训练。也可用 `--pretrained <权重路径>` 临时覆盖配置中的权重路径。
-
-训练时每个 epoch 都会记录训练 L1 loss 与验证 PSNR。查看曲线：
-
-```powershell
-tensorboard --logdir outputs/edsr_realsr_x2_finetune/logs
-```
-
-## 使用作者公布的权重做基线
-
-将作者的 `.pt` 或 `.pth` 文件放入 `weights/`（该目录不会自动创建），**先确认该权重对应的放大倍率、特征通道数和残差块数量**。它们必须与配置中的 `model.scale`、`model.num_features`、`model.num_blocks` 一致；公开的 EDSR 基线通常是 x2/x3/x4、256 通道、32 个残差块，但请以作者说明为准。
-
-原始权重推理时需显式提供模型配置：
-
-```powershell
-python infer.py --checkpoint weights/author_edsr_x4.pt --config configs/default.yaml --input sample_lr.png --output outputs/baseline.png
-```
-
-加载器支持本项目保存的 checkpoint，以及常见的 `model`、`state_dict`、`model_state_dict`、`params` 和 `params_ema` 封装格式；也兼容 EDSR-PyTorch 常见的模块键名。默认严格检查结构，因此它是可复现 baseline 的安全选择。若报告“不兼容”，不要直接加 `--non-strict` 后宣称它是 baseline；应先调整配置，或使用作者原仓库的推理代码。
-
-如需在作者权重基础上微调，在配置中填写：
-
-```yaml
-train:
-  pretrained: weights/author_edsr_x4.pt
-  pretrained_strict: true
-```
-
-`pretrained` 仅初始化模型参数；`resume` 则同时恢复模型、优化器、学习率调度器和 epoch，二者不应同时使用。
+| 成员 | 工作 |
+|------|------|
+| xjs | RealSR 数据管线、augmentation |
+| zxr | EDSR 训练框架、微调流程 |
+| lrq | 评测工具 |
+| ljh | 消融实验（训练策略 + 推理策略） |
