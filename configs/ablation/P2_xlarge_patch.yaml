@@ -1,0 +1,39 @@
+# P2: Extra Large Patch (256) experiment
+# 测试更大 patch 是否还能继续涨点
+seed: 42
+device: auto
+output_dir: outputs/ablation/P2_xlarge_patch
+
+model:
+  type: edsr
+  scale: 2
+  num_features: 256
+  num_blocks: 32
+  res_scale: 0.1
+
+data:
+  mode: realsr_x2
+  manifest: data_pipeline/splits/realsr_x2.json
+  root: data/realsr
+  patch_size: 256
+  augmentation: geometry
+  train_hr_dir: null
+  val_hr_dir: null
+  train_lr_dir: null
+  val_lr_dir: null
+  num_workers: 0
+  augment: true
+
+train:
+  epochs: 80
+  batch_size: 2
+  learning_rate: 0.00001
+  weight_decay: 0.0
+  milestones: [50, 70]
+  gamma: 0.5
+  save_every: 10
+  resume: null
+  pretrained: weights/edsr_x2-0edfb8a3.pt
+  pretrained_strict: true
+  amp: true
+  loss: l1
