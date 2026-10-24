@@ -38,3 +38,22 @@ def save_checkpoint(path: Path, **state: object) -> None:
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
+
+
+def self_ensemble_predict(model: torch.nn.Module, lr_tensor: Tensor) -> Tensor:
+    """Self-ensemble x8: 4 rotations × 2 flips, average the predictions."""
+    preds = []
+    for flip in [False, True]:
+        for rot in range(4):
+            x = lr_tensor
+            if flip:
+                x = torch.flip(x, [-1])
+            if rot > 0:
+                x = torch.rot90(x, rot, [-2, -1])
+            sr = model(x)
+            if rot > 0:
+                sr = torch.rot90(sr, -rot, [-2, -1])
+            if flip:
+                sr = torch.flip(sr, [-1])
+            preds.append(sr)
+    return torch.stack(preds).mean(dim=0)

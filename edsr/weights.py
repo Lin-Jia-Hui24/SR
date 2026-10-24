@@ -61,11 +61,10 @@ def load_weights(
         )
     model.load_state_dict(compatible, strict=False)
     return {
-        "checkpoint": str(checkpoint_path),
+        "checkpoint_path": str(checkpoint_path),
         "loaded": len(compatible),
         "model_tensors": len(target),
         "missing": missing,
         "unexpected": unexpected,
         "shape_mismatch": incompatible_shapes,
-        "checkpoint": raw,
     }

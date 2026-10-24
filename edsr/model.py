@@ -90,3 +90,13 @@ class EDSR(nn.Module):
         x = self.head(self.sub_mean(x * 255.0))
         residual = self.body_tail(self.body(x))
         return self.add_mean(self.tail(x + residual)) / 255.0
+
+
+def build_model(cfg: dict) -> EDSR:
+    """Instantiate an EDSR model from config dict (the ``model`` section of the YAML)."""
+    return EDSR(
+        scale=cfg.get("scale", 2),
+        num_features=cfg.get("num_features", 256),
+        num_blocks=cfg.get("num_blocks", 32),
+        res_scale=cfg.get("res_scale", 0.1),
+    )

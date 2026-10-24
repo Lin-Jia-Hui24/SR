@@ -6,4 +6,8 @@ data/
 outputs/
 .mplconfig/
 weights/
-
+legacy/
+SwinIR/
+results/
+report/
+docs/
