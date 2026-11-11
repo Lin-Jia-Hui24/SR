@@ -11,3 +11,6 @@ SwinIR/
 results/
 report/
 docs/
+logs/
+.proxy/
+.tmp/

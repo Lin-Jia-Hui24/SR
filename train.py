@@ -192,11 +192,13 @@ def main() -> None:
             "epochs_without_improvement": epochs_without_improvement,
             "config": cfg,
         }
-        # Always save last and per-epoch
+        # Always save last (resume) and best; per-epoch snapshots only every save_every.
         save_checkpoint(output / "last.pt", **state)
-        save_checkpoint(output / f"epoch_{epoch:03d}.pt", **state)
         if improved:
             save_checkpoint(output / "best.pt", **state)
+        save_every = train_cfg.get("save_every", 1) or 1
+        if epoch % save_every == 0 or epoch == train_cfg["epochs"]:
+            save_checkpoint(output / f"epoch_{epoch:03d}.pt", **state)
         if patience is not None and epochs_without_improvement >= patience:
             print(f"Early stopping after {patience} epochs without a PSNR improvement of {min_delta} dB.")
             break
